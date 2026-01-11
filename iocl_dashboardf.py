@@ -5,9 +5,9 @@
 ║                     Professional HR Management System                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-Developer: Expert Full Stack Developer
+Developer: Apprentice
 Technology Stack: Streamlit, Pandas, Plotly
-Version: 1.0.1 (COMPLETE - PRODUCTION READY)
+Version: 1.0.1
 """
 
 import streamlit as st
@@ -25,8 +25,8 @@ from io import BytesIO
 # PAGE CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Project IOCL | HR Analytics Dashboard",
-    page_icon="🛢️",
+    page_title="HR Analytics Dashboard",
+    page_icon="⛽",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -348,23 +348,10 @@ def main():
         st.stop()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # SIDEBAR - LOGO AND FILTERS
+    # SIDEBAR - AND FILTERS
     # ═══════════════════════════════════════════════════════════════════════
 
     with st.sidebar:
-        # Logo Display
-        try:
-            logo = Image.open('Logos.png')
-            st.image(logo, se_container_width=True)
-        except:
-            st.markdown("""
-            <div style='text-align: center; padding: 2rem; background: white; border-radius: 10px;'>
-                <h1 style='color: #f97316; margin: 0;'>🛢️</h1>
-                <h2 style='color: #1e40af; margin: 0.5rem 0 0 0;'>IndianOil</h2>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("---")
 
         st.markdown("### 🔍 Global Filters")
 
@@ -414,22 +401,15 @@ def main():
 
         st.markdown("---")
 
-        # Reset Filters Button
-        if st.button("🔄 Reset All Filters", use_container_width=True):
+        # CORRECTED RESET LOGIC TO PREVENT INFINITE LOOP
+        if st.button("🔄 RESET ALL FILTERS", use_container_width=True, type="primary"):
+            # Clear all keys in session state to force widgets back to defaults
+            for key in st.session_state.keys():
+                del st.session_state[key]
+            # Trigger a single clean rerun
             st.rerun()
 
         st.markdown("---")
-
-        # Info Section
-        st.markdown("""
-        <div style='background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 8px; margin-top: 1rem;'>
-            <p style='color: #ffffff; margin: 0; font-size: 0.8rem; text-align: center;'>
-                <strong>Indian Oil Corporation Ltd.</strong><br>
-                GSPL HQ Guwahati<br>
-                HR Management System v1.0.1
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
 
     # Apply filters to data
     filtered_df = df.copy()
@@ -457,14 +437,31 @@ def main():
         st.stop()  # Stops execution, prevents all errors
     
     # HEADER SECTION
-    st.markdown("""
-    <div class='header-container'>
-        <h1 class='header-title'>GSPL HQ HR Analytics Dashboard</h1>
-        <p class='header-subtitle'>
-            Indian Oil Corporation Limited | GSPL Headquarters Guwahati | Real-time HR Insights & Analytics
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Using 3 columns: [Logo Area, Main Header Area, Spacer for Symmetry]
+    head_col1, head_col2, head_col3 = st.columns([1, 4, 1])
+    
+    with head_col1:
+        try:
+            logo_img = Image.open('Logo.png')
+            st.image(logo_img, width=120) # Adjusted size for better fit
+        except:
+            st.markdown("### 🛢️")
+    
+    with head_col2:
+        st.markdown("""
+        <div class='header-container' style='text-align: center;'>
+            <h1 class='header-title'>HR Analytics Dashboard</h1>
+            <p class='header-subtitle'>
+                GSPL HQ Guwahati | Indian Oil Corporation Ltd.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with head_col3:
+        # Empty column to push the blue box into the center
+        pass
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # KEY METRICS SECTION
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -525,7 +522,7 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════
 
     with tab1:
-        st.markdown("## 📈 Executive Summary & Key Insights")
+        st.markdown(" ")
 
         col1, col2 = st.columns(2)
 
@@ -645,6 +642,19 @@ def main():
 
             st.plotly_chart(fig_gender, use_container_width=True)
 
+            # NEW INTERACTIVE SECTION FOR GENDER
+            gender_list = gender_data['Gender'].tolist()
+            
+            selected_gen = st.selectbox(
+                "Select gender to view employees:",
+                options=gender_list,
+                key='gender_view_selector' # Unique key for this tab
+            )
+
+            if selected_gen:
+                gen_df = filtered_df[filtered_df['Gender'] == selected_gen]
+                display_employee_list(gen_df, 'Gender', selected_gen)
+
         with col4:
             st.markdown("### 📅 Age Group Distribution")
 
@@ -691,7 +701,7 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════
 
     with tab2:
-        st.markdown("## 📍 Location-wise Detailed Analysis")
+        st.markdown(" ")
 
         location_summary = filtered_df.groupby('Location').agg({
             'Employee No.': 'count',
@@ -746,6 +756,23 @@ def main():
 
             st.plotly_chart(fig_loc_bar, use_container_width=True)
 
+            # NEW INTERACTIVE SECTION FOR LOCATION TAB
+            loc_list_tab2 = sorted(location_summary['Location'].tolist())
+            
+            # Defaulting to Guwahati if it exists in the filtered list
+            default_ix_loc = loc_list_tab2.index("Guwahati") if "Guwahati" in loc_list_tab2 else 0
+
+            selected_loc_tab2 = st.selectbox(
+                "Select Location to view employees:",
+                options=loc_list_tab2,
+                index=default_ix_loc,
+                key='location_tab_selector'
+            )
+
+            if selected_loc_tab2:
+                loc_tab_df = filtered_df[filtered_df['Location'] == selected_loc_tab2]
+                display_employee_list(loc_tab_df, 'Location_Tab', selected_loc_tab2)
+
         with col2:
             loc_dept = filtered_df.groupby(['Location', 'Personnel Sub Area']).size().reset_index(name='Count')
             top_loc_dept = loc_dept.nlargest(15, 'Count')
@@ -766,12 +793,15 @@ def main():
 
             st.plotly_chart(fig_sunburst, use_container_width=True)
 
+            
+            
+
     # ═══════════════════════════════════════════════════════════════════════
     # TAB 3: DEPARTMENT ANALYSIS
     # ═══════════════════════════════════════════════════════════════════════
 
     with tab3:
-        st.markdown("## 🏢 Department-wise Comprehensive Analysis")
+        st.markdown("### 🏢 Department-wise Comprehensive Analysis")
 
         dept_summary = filtered_df.groupby('Personnel Sub Area').agg({
             'Employee No.': 'count',
@@ -883,7 +913,7 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════
 
     with tab4:
-        st.markdown("## 🎓 Education & Skill Analysis")
+        st.markdown("### 🎓 Education & Skill Analysis")
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -966,7 +996,7 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════
 
     with tab5:
-        st.markdown("## 👥 Workforce Demographics Analysis")
+        st.markdown("### 👥 Workforce Demographics Analysis")
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -1020,6 +1050,12 @@ def main():
 
             st.plotly_chart(fig_age_hist, use_container_width=True)
 
+            # To make it interactive like your other charts:
+            age_list_hist = sorted(filtered_df['Age'].unique().tolist())
+            selected_age = st.selectbox("Select Age to view employees:", options=age_list_hist, key='age_hist_selector')
+            if selected_age:
+                display_employee_list(filtered_df[filtered_df['Age'] == selected_age], 'Age_Distribution', f"Age {selected_age}")
+
         with col2:
             st.markdown("### 🗣️ Language Diversity")
 
@@ -1048,6 +1084,19 @@ def main():
             )
 
             st.plotly_chart(fig_lang, use_container_width=True)
+
+            # NEW INTERACTIVE SECTION FOR LANGUAGE DIVERSITY
+            lang_list = lang_data['Language'].tolist()
+            
+            selected_lang = st.selectbox(
+                "Select Mother Tongue to view employees:",
+                options=lang_list,
+                key='language_tab_selector'
+            )
+
+            if selected_lang:
+                lang_df = filtered_df[filtered_df['Mother Tongue'] == selected_lang]
+                display_employee_list(lang_df, 'Language_Tab', selected_lang)
 
         st.markdown("---")
 
@@ -1083,7 +1132,7 @@ def main():
 
     
     with tab8:
-        st.markdown("## 📋 Complete Employee Directory")
+        st.markdown("### 📋 Complete Employee Directory")
 
         col1, col2, col3 = st.columns(3)
 
@@ -1233,7 +1282,7 @@ def main():
                         st.info("Experience data not selected")
 
 ########################################
-#Milistone section
+# Milistone section
 #########################################
     with tab6:
         st.markdown("### 🎂 Events & Milestones Dashboard")
@@ -1491,13 +1540,13 @@ def main():
         <hr style="margin-top:3rem;margin-bottom:1rem;border:0;border-top:1px solid #e5e7eb;" />
         <div style="text-align:center;font-size:0.9rem;color:#4b5563;">
             <div style="font-weight:600;color:#111827;">
-                Developed by: <span style="color:#1d4ed8;">Anup Kawar</span>
+                Developed by: Anup Kawar
             </div>
             <div>
-                Full Stack Developer | Indian Oil Corporation Limited (IOCL)
+                GSPL HQ Guwahati | Indian Oil Corporation Ltd. (IOCL)
             </div>
             <div style="margin-top:0.25rem;color:#6b7280;">
-                Built with ❤️ using Streamlit, Pandas & Plotly | Version 1.0.1 (COMPLETE - PRODUCTION READY)
+                Built with using Streamlit, Pandas & Plotly | Version 1.0.1 | ©2026
             </div>
         </div>
         """,
