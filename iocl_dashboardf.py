@@ -1532,7 +1532,7 @@ def main():
         <hr style="margin-top:3rem;margin-bottom:1rem;border:0;border-top:1px solid #e5e7eb;" />
         <div style="text-align:center;font-size:0.9rem;color:#4b5563;">
             <div style="font-weight:600;color:#111827;">
-                Developed by: Anup Kawar
+                Developed by: IOCL Apprentice
             </div>
             <div>
                 GSPL HQ Guwahati | Indian Oil Corporation Ltd. (IOCL)
