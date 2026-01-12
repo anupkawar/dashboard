@@ -793,6 +793,74 @@ def main():
 
             st.plotly_chart(fig_sunburst, use_container_width=True)
 
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # TREEMAP: FADING DECREASING ORDER (Deep Navy -> Soft Grey)
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        st.markdown("### 🗺️ Organizational Structure Treemap")
+        if not filtered_df.empty:
+            tm_data = filtered_df.groupby(["Location", "Personnel Sub Area"]).size().reset_index(name="Headcount")
+            
+            # Professional Fading Scale: Darker colors for higher headcount, lighter for lower
+            fading_eye_safe_scale = ["#cbd5e1", "#94a3b8", "#475569", "#1e3a8a"] # Reversed for visual hierarchy
+            
+            fig_tm = px.treemap(
+                tm_data,
+                path=["Location", "Personnel Sub Area"],
+                values="Headcount",
+                color="Headcount",
+                color_continuous_scale=fading_eye_safe_scale,
+                hover_data={"Headcount": ":,"},
+            )
+            
+            fig_tm.update_traces(
+                textinfo="label+value",
+                textfont=dict(size=14, family="Inter", color="white"),
+                marker=dict(line=dict(width=1.5, color="#f8fafc")), # Subtle separation
+                hovertemplate='<b>%{label}</b><br>Employees: %{value}<extra></extra>'
+            )
+            
+            fig_tm.update_layout(
+                margin=dict(l=0, r=0, t=30, b=0),
+                height=550,
+                coloraxis_colorbar=dict(title="Headcount", thickness=15)
+            )
+            
+            st.plotly_chart(fig_tm, use_container_width=True, key="tm_location_fading", config={'displayModeBar': False})
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # SUBSET INSPECTOR (Click-Alternative for Drilldown)
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            st.markdown(" ")
+            st.caption("Drill down into any block above to view the specific list of employees.")
+            
+            ins1, ins2 = st.columns(2)
+            with ins1:
+                inspect_loc = st.selectbox(
+                    "1. Select Location (Outer Box)", 
+                    options=sorted(filtered_df['Location'].unique()),
+                    key="tm_insp_loc_final"
+                )
+            with ins2:
+                available_subs = sorted(filtered_df[filtered_df['Location'] == inspect_loc]['Personnel Sub Area'].unique())
+                inspect_sub = st.selectbox(
+                    f"2. Select Subset in {inspect_loc} (Inner Box)", 
+                    options=["All Subsets"] + available_subs,
+                    key="tm_insp_sub_final"
+                )
+
+            # Filter data for display
+            final_subset_df = filtered_df[filtered_df['Location'] == inspect_loc]
+            if inspect_sub != "All Subsets":
+                final_subset_df = final_subset_df[final_subset_df['Personnel Sub Area'] == inspect_sub]
+            
+            # Use professional helper function from iocl_dashboardf.py
+            display_employee_list(final_subset_df, "Treemap_Drilldown", f"{inspect_loc} - {inspect_sub}")
+            
+        else:
+            st.warning("⚠️ No data available for the Treemap with current filters.")
+
+        st.markdown("---")
+
             
             
 
@@ -1129,157 +1197,81 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════
     # TAB 6: EMPLOYEE DIRECTORY
     # ═══════════════════════════════════════════════════════════════════════
-
-    
     with tab8:
         st.markdown("### 📋 Complete Employee Directory")
 
+        # Top Metric and Search Controls
         col1, col2, col3 = st.columns(3)
-
         with col1:
-            st.metric("📊 Total Records", len(filtered_df))
-
+            st.metric("📊 Total Headcount", len(filtered_df))
         with col2:
-            search_name = st.text_input("🔍 Search by Name", placeholder="Enter employee name...")
-
+            search_name = st.text_input("🔍 Search Name", placeholder="Type name...", key="dir_search_name")
         with col3:
-            search_empid = st.text_input("🔍 Search by Employee ID", placeholder="Enter employee ID...")
+            search_empid = st.text_input("🔍 Search Emp ID", placeholder="Type ID...", key="dir_search_id")
 
         st.markdown("---")
        
-        display_directory_df = filtered_df.copy()
+        # Create a Copy for the Directory Table
+        display_df = filtered_df.copy()
 
+        # Apply Search Logic
         if search_name:
-            display_directory_df = display_directory_df[
-                display_directory_df['Full Name'].str.contains(search_name, case=False, na=False)
-            ]
-
+            display_df = display_df[display_df['Full Name'].str.contains(search_name, case=False, na=False)]
         if search_empid:
-            display_directory_df = display_directory_df[
-                display_directory_df['Employee No.'].astype(str).str.contains(search_empid, na=False)
-            ]
+            display_df = display_df[display_df['Employee No.'].astype(str).str.contains(search_empid, na=False)]
 
-        st.markdown("### 📊 Customize View")
-
-        all_columns = {
-            'Employee No.': 'Employee ID',
+        # Explicit Mapping for Table Columns (Ordered as requested)
+        requested_cols = {
+            'Employee No.': 'Emp ID',
             'Full Name': 'Name',
             'Gender': 'Gender',
+            'Personnel Area': 'Area',
+            'Personnel Sub Area': 'Sub Area',
             'Designation': 'Designation',
-            'Location': 'Location',
-            'Personnel Sub Area': 'Department',
             'Cadre': 'Cadre',
+            'Minority': 'Minority',
+            'Whether Physically Handicap': 'Handicap',
+            'Mother Tongue': 'Mother Tongue',
+            'Email Id': 'Email ID',
             'Age': 'Age',
-            'Experience (Years)': 'Experience',
-            'Email Id': 'Email',
-            'Cell No': 'Mobile',
-            'Education Profile': 'Education',
-            'Mother Tongue': 'Language',
-            'Date of Joining Corporation': 'Join Date'
+            'Experience (Years)': 'Total Service',
+            'Service GSPL': 'Service in GSPL',
+            'Tenure in Position (Years)': 'Current Position',
+            'Years in Grade': 'Years in Grade',
+            'Birthday': 'Birthday',
+            'Anniversary': 'Anniversary',
+            'Year of Retirement': 'Year of Retirement'
         }
 
-        default_cols = ['Employee No.', 'Full Name', 'Gender', 'Designation', 'Location', 
-                       'Personnel Sub Area', 'Email Id', 'Cell No']
+        # Filter available columns and display
+        available = [c for c in requested_cols.keys() if c in display_df.columns]
+        final_table = display_df[available].rename(columns=requested_cols)
 
-        selected_cols = st.multiselect(
-            "Select columns to display:",
-            options=list(all_columns.keys()),
-            default=default_cols,
-            key='directory_cols'
-        )
+        # Apply standard numeric formatting
+        num_cfg = {col: st.column_config.NumberColumn(col, format="%.1f") for col in 
+                  ['Age', 'Total Service', 'Service in GSPL', 'Current Position', 'Years in Grade']}
 
-        if not selected_cols:
-            selected_cols = default_cols
-
-        st.markdown("---")
-
-        st.markdown(f"### 📋 Showing {len(display_directory_df)} Employees")
-
-        directory_display = display_directory_df[selected_cols].copy()
-        directory_display.columns = [all_columns.get(col, col) for col in selected_cols]
-
-        for col in directory_display.columns:
-            if 'Date' in col or 'Join' in col:
-                if col in directory_display.columns:
-                    directory_display[col] = pd.to_datetime(directory_display[col], errors='coerce').dt.strftime('%d-%m-%Y')
-
-        col1, col2 = st.columns([3, 1])
-
-        with col1:
-            sort_by = st.selectbox(
-                "Sort by:",
-                options=directory_display.columns.tolist(),
-                key='sort_col'
-            )
-
-        with col2:
-            sort_order = st.radio("Order:", ['Ascending', 'Descending'], key='sort_order', horizontal=True)
-
-        if sort_by:
-            directory_display = directory_display.sort_values(
-                by=sort_by,
-                ascending=(sort_order == 'Ascending')
-            )
-
+        # Display High-Contrast Table (Sort/Order UI removed)
         st.dataframe(
-            directory_display,
-            use_container_width=True,
-            hide_index=True,
-            height=600
+            final_table, 
+            use_container_width=True, 
+            hide_index=True, 
+            height=550, 
+            column_config=num_cfg
         )
 
+        # Synced Export Section
         st.markdown("---")
-
-        st.markdown("### 📥 Export Data")
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            csv = directory_display.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download as CSV",
-                data=csv,
-                file_name=f"IOCL_ERPL_Employees_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
-        with col2:
+        exp1, exp2 = st.columns(2)
+        with exp1:
+            st.download_button("📥 Download CSV", final_table.to_csv(index=False).encode('utf-8'), 
+                               "IOCL_Directory.csv", "text/csv", use_container_width=True)
+        with exp2:
+            from io import BytesIO
             output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                directory_display.to_excel(writer, index=False, sheet_name='Employees')
-            excel_data = output.getvalue()
-
-            st.download_button(
-                label="📥 Download as Excel",
-                data=excel_data,
-                file_name=f"IOCL_ERPL_Employees_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-
-        with col3:
-            if st.button("📊 Show Statistics", use_container_width=True):
-                st.markdown("#### 📈 Quick Statistics")
-
-                stats_col1, stats_col2, stats_col3 = st.columns(3)
-
-                with stats_col1:
-                    st.info(f"**Total Records:** {len(display_directory_df)}")
-
-                with stats_col2:
-                    if 'Age' in display_directory_df.columns:
-                        avg_age = display_directory_df['Age'].mean()
-                        st.info(f"**Avg Age:** {avg_age:.1f} years")
-                    else:
-                        st.info("Age data not selected")
-
-                with stats_col3:
-                    if 'Experience (Years)' in display_directory_df.columns:
-                        avg_exp = display_directory_df['Experience (Years)'].mean()
-                        st.info(f"**Avg Experience:** {avg_exp:.1f} years")
-                    else:
-                        st.info("Experience data not selected")
+            final_table.to_excel(output, index=False)
+            st.download_button("📥 Download Excel", output.getvalue(), 
+                               "IOCL_Directory.xlsx", "application/vnd.ms-excel", use_container_width=True)
 
 ########################################
 # Milistone section
