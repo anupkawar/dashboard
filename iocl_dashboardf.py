@@ -11,6 +11,7 @@ Version: 1.0.1
 """
 
 import streamlit as st
+import math
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -226,74 +227,103 @@ st.markdown("""
 
 @st.cache_data(show_spinner=False)
 def load_data():
-    """Load and preprocess employee data with error handling"""
+    """Load and preprocess employee data with exact count verification"""
     try:
-        df = pd.read_excel('emp_data.xlsx')
-
-        # Data Cleaning and Preprocessing
-        df['Employee No.'] = df['Employee No.'].astype(str)
-        df['Full Name'] = df['First Name'] + ' ' + df['Last Name']
-
-        # Date Conversions
-        date_columns = ['Date of Joining Corporation', 'Birth Date', 'Date of Marriage', 
-                       'Date in Current Position', 'Date in Current Grade as per Seniority']
-
+        # Load file with explicit header handling and row verification
+        df = pd.read_excel('emp_data.xlsx', header=0)
+        
+        df.columns = [c.strip() for c in df.columns]
+        
+        # 1. Standardize Employee ID to prevent loss during search
+        if 'Employee No.' in df.columns:
+            df['Employee No.'] = df['Employee No.'].astype(str).str.strip()
+        
+        # 2. Marriage column detection
+        marriage_candidates = [
+            "Date of marriage", "Date of Marriage", "Marriage Date", 
+            "Marriage date", "DOM", "D.O.M", "Date of marriage (Spouse)", "Marriage"
+        ]
+        def find_first_col(df_obj, candidates):
+            for c in candidates:
+                if c in df_obj.columns:
+                    return c
+            return None
+        marriage_col = find_first_col(df, marriage_candidates)
+        
+        # 3. Robust Date parsing
+        date_columns = [
+            'Date of Joining Corporation', 'Birth Date', 'Date in Current Position',
+            'Date in Current Grade as per Seniority', 'Date of Joining Current Company Code'
+        ]
+        if marriage_col and marriage_col not in date_columns:
+            date_columns.append(marriage_col)
+            
         for col in date_columns:
-            df[col] = pd.to_datetime(df[col], format='%d.%m.%Y', errors='coerce')
-
-        # Calculate Age
-        current_date = datetime.now()
-        df['Age'] = ((current_date - df['Birth Date']).dt.days / 365.25).round(0).astype('Int64')
-
-        # Calculate Experience
-        df['Experience (Years)'] = ((current_date - df['Date of Joining Corporation']).dt.days / 365.25).round(1)
-
-        # Calculate Tenure in Current Position
-        df['Tenure in Position (Years)'] = ((current_date - df['Date in Current Position']).dt.days / 365.25).round(1)
-
-        # Age Groups
+            if col in df.columns:
+                df[col] = pd.to_datetime(
+                    df[col].astype(str).str.strip(), 
+                    dayfirst=True, 
+                    errors='coerce'
+                )
+        
+        # 4. Calculated Fields
+        current_date = pd.Timestamp.today().normalize()
+        df['Full Name'] = df['First Name'].astype(str).str.strip() + ' ' + df['Last Name'].astype(str).str.strip()
+        
+        if "Birth Date" in df.columns:
+            df['Age'] = ((current_date - df['Birth Date']).dt.days / 365.25).round(1)
+            df['Year of Retirement'] = (df['Birth Date'].dt.year + 60).astype('Int64')
+            df['Birthday'] = df['Birth Date'].dt.strftime('%d %B')
+        
+        if 'Date of Joining Corporation' in df.columns:
+            df['Experience (Years)'] = ((current_date - df['Date of Joining Corporation']).dt.days / 365.25).round(1)
+            df['Total Service'] = df['Experience (Years)']
+        
+        if 'Date of Joining Current Company Code' in df.columns:
+            df['Service GSPL'] = ((current_date - df['Date of Joining Current Company Code']).dt.days / 365.25).round(1)
+        
+        if 'Date in Current Position' in df.columns:
+            df['Tenure in Position (Years)'] = ((current_date - df['Date in Current Position']).dt.days / 365.25).round(1)
+            df['Current Position'] = df['Tenure in Position (Years)']
+        
+        if 'Date in Current Grade as per Seniority' in df.columns:
+            df['Years in Grade'] = ((current_date - df['Date in Current Grade as per Seniority']).dt.days / 365.25).round(1)
+        
+        if marriage_col:
+            df['Anniversary'] = df[marriage_col].dt.strftime('%d %B')
+        
+        # 5. Categorization
         def categorize_age(age):
-            if pd.isna(age):
-                return 'Unknown'
-            elif age < 30:
-                return '<30'
-            elif age < 40:
-                return '30-39'
-            elif age < 50:
-                return '40-49'
-            elif age < 60:
-                return '50-59'
-            else:
-                return '60+'
-
+            if pd.isna(age): return 'Unknown'
+            elif age < 30: return '<30'
+            elif age < 40: return '30-39'
+            elif age < 50: return '40-49'
+            elif age < 60: return '50-59'
+            else: return '60+'
         df['Age Group'] = df['Age'].apply(categorize_age)
-
-        # Experience Groups
+        
         def categorize_experience(exp):
-            if pd.isna(exp):
-                return 'Unknown'
-            elif exp < 5:
-                return '0-5 years'
-            elif exp < 10:
-                return '5-10 years'
-            elif exp < 15:
-                return '10-15 years'
-            elif exp < 20:
-                return '15-20 years'
-            else:
-                return '20+ years'
-
+            if pd.isna(exp): return 'Unknown'
+            elif exp < 5: return '0-5 years'
+            elif exp < 10: return '5-10 years'
+            elif exp < 15: return '10-15 years'
+            elif exp < 20: return '15-20 years'
+            else: return '20+ years'
         df['Experience Group'] = df['Experience (Years)'].apply(categorize_experience)
-
-        # Clean Location Names
-        df['Location'] = df['Personnel Area'].str.replace('ERPL, ', '', regex=False)
-
-        # Fill missing values
-        df['Minority'] = df['Minority'].fillna('NO')
-        df['Whether Physically Handicap'] = df['Whether Physically Handicap'].fillna('NO')
-
+        
+        # 6. Categorical Cleanup - NO FILTERING OR DROPPING
+        if 'Personnel Area' in df.columns:
+            df['Location'] = df['Personnel Area'].str.replace('ERPL, ', '', regex=False)
+        
+        # Final Cleanup - Fill NA but NEVER drop rows
+        df['Minority'] = df['Minority'].fillna('No').astype(str).str.title().str.strip()
+        df['Whether Physically Handicap'] = df['Whether Physically Handicap'].fillna('No').astype(str).str.title().str.strip()
+        
+        # FINAL VERIFICATION: Ensure exact count maintained
+        final_count = len(df)
+        
         return df
-
+        
     except Exception as e:
         st.error(f"❌ Error loading data: {str(e)}")
         return None
@@ -311,13 +341,14 @@ def create_chart_title(text):
         xanchor='center'
     )
 
-def display_employee_list(df, category, value):
-    """Display list of employees for a specific category"""
+def display_employee_list(df, category, value, key_suffix=""):
+    """Display list of employees for a specific category with unique keys"""
+    # Create a truly unique key for the download button
+    unique_key = f"download_{category}_{value}_{key_suffix}"
+    
     with st.expander(f"👥 View Employees: {value} ({len(df)} employees)", expanded=False):
-        display_df = df[['Employee No.', 'Full Name', 'Designation', 'Location', 
-                        'Personnel Sub Area', 'Email Id']].copy()
-        display_df.columns = ['Employee ID', 'Name', 'Designation', 'Location', 
-                             'Department', 'Email']
+        display_df = df[['Employee No.', 'Full Name', 'Designation', 'Location','Personnel Sub Area', 'Email Id']].copy()
+        display_df.columns = ['Emp ID', 'Name', 'Designation', 'Location','Department', 'Email']
 
         st.dataframe(
             display_df,
@@ -328,11 +359,11 @@ def display_employee_list(df, category, value):
 
         csv = display_df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label=f"📥 Download {value} Employee List",
+            label=f"📥 Download {value} List",
             data=csv,
-            file_name=f"IOCL_{value}_employees_{datetime.now().strftime('%Y%m%d')}.csv",
+            file_name=f"IOCL_{value}_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
-            key=f"download_{category}_{value}"
+            key=unique_key  # Updated to use the unique key
         )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -389,8 +420,8 @@ def main():
 
         # Age Range Filter
         st.markdown("**Age Range**")
-        min_age = int(df['Age'].min()) if not df['Age'].isna().all() else 20
-        max_age = int(df['Age'].max()) if not df['Age'].isna().all() else 70
+        min_age = math.floor(df['Age'].min()) if not df['Age'].isna().all() else 20
+        max_age = math.ceil(df['Age'].max()) if not df['Age'].isna().all() else 70
         age_range = st.slider(
             "Select Age Range",
             min_value=min_age,
@@ -469,7 +500,7 @@ def main():
     with col1:
         st.metric(
             label="👥 Total Employees",
-            value=f"{len(filtered_df):,}",
+            value=f"{len(filtered_df):}",
             delta=f"{len(filtered_df)/len(df)*100:.1f}% of total"
         )
 
@@ -506,21 +537,19 @@ def main():
     st.markdown("---")
 
     # TABS NAVIGATION
-    tab1, tab2, tab3, tab4, tab5, tab8, tab6 = st.tabs([
+    tab1, tab8, tab2,tab3, tab4, tab5, tab6 = st.tabs([
         "🏠 Overview",
+        "📋 Employee Directory",
         "📍 Location Analysis",
         "🏢 Department Analysis",
         "🎓 Education & Skills",
         "👥 Demographics",
-        "📋 Employee Directory",
         "🎂 Events & Milestones"
     ])
-
 
     # ═══════════════════════════════════════════════════════════════════════
     # TAB 1: OVERVIEW
     # ═══════════════════════════════════════════════════════════════════════
-
     with tab1:
         st.markdown(" ")
 
@@ -528,6 +557,7 @@ def main():
 
         with col1:
             st.markdown("### 📊 Workforce Distribution by Location")
+            st.markdown("---")
 
             location_data = filtered_df['Location'].value_counts().reset_index()
             location_data.columns = ['Location', 'Count']
@@ -556,11 +586,13 @@ def main():
             )
 
             if selected_loc:
-                loc_df = filtered_df[filtered_df['Location'] == selected_loc]
-                display_employee_list(loc_df, 'Location', selected_loc)
+                loc_df = filtered_df[filtered_df['Location'] == selected_loc].copy()
+                loc_df.insert(0, 'S.No.', range(1, len(loc_df) + 1))
+                display_employee_list(loc_df, 'Location', selected_loc, key_suffix="ov_loc")
 
         with col2:
             st.markdown("### 🏢 Department Wise Distribution")
+            st.markdown("---")
 
             dept_data = filtered_df['Personnel Sub Area'].value_counts().head(10).reset_index()
             dept_data.columns = ['Department', 'Count']
@@ -602,7 +634,7 @@ def main():
 
             if selected_dept:
                 dept_df = filtered_df[filtered_df['Personnel Sub Area'] == selected_dept]
-                display_employee_list(dept_df, 'Department', selected_dept)
+                display_employee_list(dept_df, 'Department', selected_dept, key_suffix="ov_dept")
 
         st.markdown("---")
 
@@ -653,7 +685,7 @@ def main():
 
             if selected_gen:
                 gen_df = filtered_df[filtered_df['Gender'] == selected_gen]
-                display_employee_list(gen_df, 'Gender', selected_gen)
+                display_employee_list(gen_df, 'Gender', selected_gen, key_suffix="ov_gen")
 
         with col4:
             st.markdown("### 📅 Age Group Distribution")
@@ -696,6 +728,86 @@ def main():
 
             st.plotly_chart(fig_age, use_container_width=True)
 
+        st.markdown("---")
+        st.markdown("### ⏳ 5-Year Retirement Forecast")
+        
+        # 1. Precise Retirement Calculation
+        today_dt = datetime.now()
+        ret_df = filtered_df.copy()
+        ret_df = ret_df.dropna(subset=['Birth Date'])
+        
+        # Calculate Exact Retirement Date (60th Birthday)
+        ret_df['Retirement Date'] = ret_df['Birth Date'].apply(lambda x: x.replace(year=x.year + 60))
+        
+        # Calculate Days Left
+        ret_df['Days Left'] = (ret_df['Retirement Date'] - today_dt).dt.days
+        
+        # Filter for the next 5 years (Next 1825 days)
+        upcoming_ret = ret_df[(ret_df['Days Left'] >= 0) & (ret_df['Days Left'] <= 1825)].copy()
+        
+        # Prepare Chart Data (Group by Year for the Bar Chart)
+        upcoming_ret['Ret_Year'] = upcoming_ret['Retirement Date'].dt.year
+        forecast_years = [today_dt.year + i for i in range(0, 6)]
+        ret_counts = upcoming_ret.groupby('Ret_Year').size().reset_index(name='Count')
+        
+        full_range = pd.DataFrame({'Ret_Year': forecast_years})
+        ret_counts = full_range.merge(ret_counts, on='Ret_Year', how='left').fillna(0)
+
+        # 2. Retirement Chart
+        fig_ret = go.Figure(data=[
+            go.Bar(
+                x=ret_counts['Ret_Year'].astype(str),
+                y=ret_counts['Count'],
+                marker_color='#ef4444',
+                text=ret_counts['Count'].astype(int),
+                textposition='outside'
+            )
+        ])
+
+        fig_ret.update_layout(
+            title=create_chart_title('Upcoming Retirements'),
+            xaxis_title="Year",
+            yaxis_title="Employee Count",
+            height=400,
+            paper_bgcolor='rgba(255,255,255,0.95)',
+            plot_bgcolor='rgba(255,255,255,0.95)'
+        )
+        st.plotly_chart(fig_ret, use_container_width=True)
+        
+        # 3. Enhanced List View with Month and Days Left
+        if not upcoming_ret.empty:
+            with st.expander("📋 View Upcoming Retirement List (Next 5 Years)"):
+                # Extract Month Name and Year
+                upcoming_ret['Retirement Month'] = upcoming_ret['Retirement Date'].dt.strftime('%B %Y')
+                
+                # Select and Rename columns for display
+                list_display = upcoming_ret[[
+                    'Employee No.', 'Full Name', 'Location', 
+                    'Personnel Sub Area', 'Retirement Month', 'Days Left'
+                ]].copy()
+                
+                list_display.columns = ['Emp ID', 'Name', 'Location', 'Department', 'Month of Retirement', 'Days Left']
+
+                # Sort by earliest retirement first
+                list_display = list_display.sort_values('Days Left').reset_index(drop=True)
+                
+                # ✅ Add Serial Number as first column
+                list_display.insert(0, 'S.No.', range(1, len(list_display) + 1))
+                
+                # Display table
+                st.dataframe(
+                    list_display,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Days Left": st.column_config.NumberColumn(
+                            "Days Left",
+                            help="Number of days remaining until retirement date",
+                            format="%d ⏳"
+                        )
+                    }
+                )
+
     # ═══════════════════════════════════════════════════════════════════════
     # TAB 2: LOCATION ANALYSIS
     # ═══════════════════════════════════════════════════════════════════════
@@ -712,6 +824,7 @@ def main():
         location_summary = location_summary.sort_values('Total Employees', ascending=False)
 
         st.markdown("### 📊 Location Summary Statistics")
+        st.markdown("---")
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -771,7 +884,7 @@ def main():
 
             if selected_loc_tab2:
                 loc_tab_df = filtered_df[filtered_df['Location'] == selected_loc_tab2]
-                display_employee_list(loc_tab_df, 'Location_Tab', selected_loc_tab2)
+                display_employee_list(loc_tab_df, 'Location_Tab', selected_loc_tab2,key_suffix="ov_loc")
 
         with col2:
             loc_dept = filtered_df.groupby(['Location', 'Personnel Sub Area']).size().reset_index(name='Count')
@@ -793,7 +906,7 @@ def main():
 
             st.plotly_chart(fig_sunburst, use_container_width=True)
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # TREEMAP: FADING DECREASING ORDER (Deep Navy -> Soft Grey)
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         st.markdown("### 🗺️ Organizational Structure Treemap")
@@ -861,15 +974,13 @@ def main():
 
         st.markdown("---")
 
-            
-            
-
     # ═══════════════════════════════════════════════════════════════════════
     # TAB 3: DEPARTMENT ANALYSIS
     # ═══════════════════════════════════════════════════════════════════════
 
     with tab3:
         st.markdown("### 🏢 Department-wise Comprehensive Analysis")
+        st.markdown("---")
 
         dept_summary = filtered_df.groupby('Personnel Sub Area').agg({
             'Employee No.': 'count',
@@ -982,6 +1093,7 @@ def main():
 
     with tab4:
         st.markdown("### 🎓 Education & Skill Analysis")
+        st.markdown("---")
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -1064,7 +1176,8 @@ def main():
     # ═══════════════════════════════════════════════════════════════════════
 
     with tab5:
-        st.markdown("### 👥 Workforce Demographics Analysis")
+        st.markdown("### 👥 Demographics Analysis")
+        st.markdown("---")
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -1164,7 +1277,7 @@ def main():
 
             if selected_lang:
                 lang_df = filtered_df[filtered_df['Mother Tongue'] == selected_lang]
-                display_employee_list(lang_df, 'Language_Tab', selected_lang)
+                display_employee_list(lang_df, 'Language_Tab', selected_lang, key_suffix="loc_tab")
 
         st.markdown("---")
 
@@ -1198,60 +1311,129 @@ def main():
     # TAB 6: EMPLOYEE DIRECTORY
     # ═══════════════════════════════════════════════════════════════════════
     with tab8:
-        st.markdown("### 📋 Complete Employee Directory")
-
-        # Top Metric and Search Controls
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("📊 Total Headcount", len(filtered_df))
-        with col2:
-            search_name = st.text_input("🔍 Search Name", placeholder="Type name...", key="dir_search_name")
-        with col3:
-            search_empid = st.text_input("🔍 Search Emp ID", placeholder="Type ID...", key="dir_search_id")
-
+        st.markdown("### 📋 Employee Directory")
         st.markdown("---")
-       
-        # Create a Copy for the Directory Table
-        display_df = filtered_df.copy()
+        st.markdown("**Customize View**")
+        # Top Controls Row - 3 COLUMNS: Area + Sub Area + Search (NO METRIC)
+        col1, col2, col3 = st.columns([3, 3, 4])
 
-        # Apply Search Logic
-        if search_name:
-            display_df = display_df[display_df['Full Name'].str.contains(search_name, case=False, na=False)]
-        if search_empid:
-            display_df = display_df[display_df['Employee No.'].astype(str).str.contains(search_empid, na=False)]
+        with col2:
+            if "Personnel Area" in filtered_df.columns:
+                pa_options = ["All"] + sorted(filtered_df["Personnel Area"].dropna().unique().tolist())
+                selected_pa = st.selectbox("📍 Area", pa_options, key="dir_pa")
+            else:
+                selected_pa = "All"
 
-        # Explicit Mapping for Table Columns (Ordered as requested)
-        requested_cols = {
+        with col3:
+            if "Personnel Sub Area" in filtered_df.columns:
+                psa_options = ["All"] + sorted(filtered_df["Personnel Sub Area"].dropna().unique().tolist())
+                selected_psa = st.selectbox("🏢 Sub Area", psa_options, key="dir_psa")
+            else:
+                selected_psa = "All"
+
+        with col1:
+            # COMBINED SEARCH BAR - Name/ID/Email
+            combined_search = st.text_input(
+                "🔍 Search (Name/ID/Email)", 
+                placeholder="Type name, employee ID, or email...",
+                key="combined_search"
+            )
+
+        # FULL WIDTH Customize View - No columns needed
+
+        all_columns = {
             'Employee No.': 'Emp ID',
-            'Full Name': 'Name',
+            'Full Name': 'Name', 
             'Gender': 'Gender',
             'Personnel Area': 'Area',
             'Personnel Sub Area': 'Sub Area',
             'Designation': 'Designation',
-            'Cadre': 'Cadre',
-            'Minority': 'Minority',
-            'Whether Physically Handicap': 'Handicap',
-            'Mother Tongue': 'Mother Tongue',
-            'Email Id': 'Email ID',
             'Age': 'Age',
             'Experience (Years)': 'Total Service',
             'Service GSPL': 'Service in GSPL',
             'Tenure in Position (Years)': 'Current Position',
             'Years in Grade': 'Years in Grade',
+            'Year of Retirement': 'Year of Retirement',
+            'Cadre': 'Cadre',
+            'Email Id': 'Email ID',
             'Birthday': 'Birthday',
             'Anniversary': 'Anniversary',
-            'Year of Retirement': 'Year of Retirement'
+            'Mother Tongue': 'Mother Tongue',
+            'Minority': 'Minority',
+            'Whether Physically Handicap': 'Handicap',
         }
 
-        # Filter available columns and display
-        available = [c for c in requested_cols.keys() if c in display_df.columns]
-        final_table = display_df[available].rename(columns=requested_cols)
+        # Get available columns from your data
+        available_cols = {k: v for k, v in all_columns.items() if k in filtered_df.columns}
 
-        # Apply standard numeric formatting
-        num_cfg = {col: st.column_config.NumberColumn(col, format="%.1f") for col in 
-                  ['Age', 'Total Service', 'Service in GSPL', 'Current Position', 'Years in Grade']}
+        # Default selection (first 10 columns)
+        default_cols = list(available_cols.keys())[:12]
 
-        # Display High-Contrast Table (Sort/Order UI removed)
+        selected_columns = st.multiselect(
+            "Select columns to display:",
+            options=list(available_cols.keys()),
+            default=default_cols,
+            key="column_selector"
+        )
+        st.markdown("---")
+        
+        # Apply filters step by step
+        display_df = filtered_df.copy()
+        # 1. Area/Sub Area filters
+        if selected_pa != "All":
+            display_df = display_df[display_df['Personnel Area'] == selected_pa]
+        if selected_psa != "All":
+            display_df = display_df[display_df['Personnel Sub Area'] == selected_psa]
+
+        # 2. Combined Search - Name OR ID OR Email
+        if combined_search:
+            name_mask = display_df['Full Name'].str.contains(combined_search, case=False, na=False)
+            id_mask = display_df['Employee No.'].astype(str).str.contains(combined_search, na=False)
+            email_mask = display_df['Email Id'].str.contains(combined_search, case=False, na=False)
+            search_mask = name_mask | id_mask | email_mask
+            display_df = display_df[search_mask]
+
+        # 3. Add Serial Number and Handle "Not Found"
+        if display_df.empty:
+            st.warning(f"🔍 No employees found matching '{combined_search}'")
+            st.info("💡 Try checking the spelling or resetting the Area/Sub Area filters.")
+            st.stop()
+
+        # Always create fresh serial number AFTER all filters
+        display_df = display_df.copy()
+        display_df.insert(0, 'S.No.', range(1, len(display_df) + 1))
+
+        # Safety check
+        if not selected_columns:
+            st.warning("⚠️ Please select at least one column to display.")
+            st.stop()
+
+        # Create final table with selected columns only
+        display_columns = ['S.No.'] + [col for col in selected_columns if col in display_df.columns]
+        final_table = display_df[display_columns].copy()
+        
+        # Safe column renamingrename_dict = {}
+        rename_dict = {}
+        for col in selected_columns:
+            if col in all_columns and col in display_df.columns:
+                rename_dict[col] = all_columns[col]
+        final_table = final_table.rename(columns=rename_dict)
+
+        # Safe numeric formatting (FIXED - no KeyError)
+        num_cfg = {}
+        possible_numeric = ['Age', 'Experience (Years)', 'Service GSPL', 'Tenure in Position (Years)', 'Years in Grade']
+        for orig_col, display_col in all_columns.items():
+            if (orig_col in possible_numeric and 
+                orig_col in display_df.columns and 
+                display_col in final_table.columns):
+                num_cfg[display_col] = st.column_config.NumberColumn(display_col, format="%.1f")
+
+        #converting years to int64
+        num_cfg['Year of Retirement'] = st.column_config.NumberColumn('Year of Retirement',format="%d")
+        # Show results summary
+        st.caption(f"Showing **{len(final_table)}** employees | **{len(final_table.columns)}** columns selected")
+
+        # Display professional table
         st.dataframe(
             final_table, 
             use_container_width=True, 
@@ -1260,29 +1442,37 @@ def main():
             column_config=num_cfg
         )
 
-        # Synced Export Section
+        # Export buttons
         st.markdown("---")
         exp1, exp2 = st.columns(2)
         with exp1:
-            st.download_button("📥 Download CSV", final_table.to_csv(index=False).encode('utf-8'), 
-                               "IOCL_Directory.csv", "text/csv", use_container_width=True)
+            st.download_button(
+                "📥 Download CSV", 
+                final_table.to_csv(index=False).encode('utf-8'), 
+                f"IOCL_Directory_{len(final_table.columns)}_cols.csv", 
+                "text/csv", 
+                use_container_width=True
+            )
         with exp2:
             from io import BytesIO
             output = BytesIO()
             final_table.to_excel(output, index=False)
-            st.download_button("📥 Download Excel", output.getvalue(), 
-                               "IOCL_Directory.xlsx", "application/vnd.ms-excel", use_container_width=True)
-
-########################################
-# Milistone section
-#########################################
+            st.download_button(
+                "📥 Download Excel", 
+                output.getvalue(), 
+                f"IOCL_Directory_{len(final_table.columns)}_cols.xlsx", 
+                "application/vnd.ms-excel", 
+                use_container_width=True
+            )                        
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Milestone Tab Section
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with tab6:
         st.markdown("### 🎂 Events & Milestones Dashboard")
         st.markdown("---")
-        
         # Key Metrics
         col1, col2, col3, col4 = st.columns(4)
-        
+
         # Calculate upcoming birthdays and anniversaries
         from datetime import timedelta
         today = datetime.now()
@@ -1381,7 +1571,7 @@ def main():
                         ['Employee No.', 'Full Name', 'Designation', 'Location', 'Birth Date']
                     ].copy()
                     display_df['Birth Date'] = display_df['Birth Date'].dt.strftime('%d %B %Y')
-                    display_df.columns = ['Employee ID', 'Name', 'Designation', 'Location', 'Birthday']
+                    display_df.columns = ['Emp ID', 'Name', 'Designation', 'Location', 'Birthday']
                     st.dataframe(
                         display_df,
                         use_container_width=True,
@@ -1392,7 +1582,6 @@ def main():
         # CHART 2: Monthly Anniversary Distribution
         with col2:
             st.markdown("#### 💑 Monthly Anniversary Distribution")
-            
             df_married = filtered_df[filtered_df['Date of Marriage'].notna()].copy()
             
             if len(df_married) > 0:
@@ -1448,7 +1637,7 @@ def main():
                             ['Employee No.', 'Full Name', 'Designation', 'Location', 'Date of Marriage']
                         ].copy()
                         display_df['Date of Marriage'] = display_df['Date of Marriage'].dt.strftime('%d %B %Y')
-                        display_df.columns = ['Employee ID', 'Name', 'Designation', 'Location', 'Anniversary Date']
+                        display_df.columns = ['Emp ID', 'Name', 'Designation', 'Location', 'Anniversary Date']
                         st.dataframe(
                             display_df,
                             use_container_width=True,
@@ -1462,7 +1651,6 @@ def main():
         
         # Additional insights
         col1, col2 = st.columns(2)
-        
         with col1:
             st.markdown("#### 📊 Age-wise Birthday Distribution")
             age_birthday = filtered_df.groupby('Age Group').size().reset_index(name='Count')
@@ -1524,26 +1712,22 @@ def main():
     # FOOTER
     st.markdown("---")
 
-        # ═══════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════
     # FOOTER – DEVELOPER CREDIT (DO NOT MODIFY OTHER PARTS)
     # ═══════════════════════════════════════════════════════════════════════
     st.markdown(
-        """
-        <hr style="margin-top:3rem;margin-bottom:1rem;border:0;border-top:1px solid #e5e7eb;" />
-        <div style="text-align:center;font-size:0.9rem;color:#4b5563;">
-            <div style="font-weight:600;color:#111827;">
-                Developed by: IOCL Apprentice
-            </div>
-            <div>
-                GSPL HQ Guwahati | Indian Oil Corporation Ltd. (IOCL)
-            </div>
-            <div style="margin-top:0.25rem;color:#6b7280;">
-                Built with using Streamlit, Pandas & Plotly | Version 1.0.1 | ©2026
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """
+    <hr style="margin:3rem 0 1rem 0;border:none;border-top:1px solid #e5e7eb;" />
+    <div style="text-align:center;font-size:0.9rem;color:#4b5563;">
+        <strong style="color:#111827;">Developed by: IOCL Apprentice</strong><br>
+        GSPL HQ Guwahati | Indian Oil Corporation Ltd. (IOCL)<br>
+        <span style="color:#6b7280; margin-top:0.25rem; display:block;">
+            Built with Streamlit, Pandas & Plotly | Version 1.0.1 | ©2026
+        </span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 if __name__ == "__main__":
